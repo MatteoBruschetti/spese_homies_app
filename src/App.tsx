@@ -35,6 +35,12 @@ import {
   Center,
   Avatar,
   Badge,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogContent,
+  AlertDialogOverlay,
 } from '@chakra-ui/react';
 import { supabase, Expense, Settlement } from './lib/supabase';
 
@@ -230,7 +236,18 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
   };
 
   return (
-    <VStack spacing={6} align="stretch" bg="white" p={8} borderRadius="3xl" shadow="sm" border="1px solid" borderColor="gray.100">
+    <VStack 
+      as="form" 
+      onSubmit={(e) => { e.preventDefault(); handleAdd(); }} 
+      spacing={6} 
+      align="stretch" 
+      bg="white" 
+      p={8} 
+      borderRadius="3xl" 
+      shadow="sm" 
+      border="1px solid" 
+      borderColor="gray.100"
+    >
       <HStack spacing={3} mb={2}>
         <Text fontSize="xl">⚡</Text>
         <Heading size="md" fontWeight="bold">Aggiungi Spesa</Heading>
@@ -269,6 +286,7 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
           {CATEGORIES.map((cat) => (
             <Button
               key={cat.name}
+              type="button"
               height="80px"
               variant="outline"
               borderRadius="2xl"
@@ -289,6 +307,7 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
       </VStack>
 
       <Button
+        type="submit"
         size="lg"
         colorScheme="blue"
         height="70px"
@@ -296,7 +315,6 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
         fontWeight="bold"
         borderRadius="2xl"
         isLoading={loading}
-        onClick={handleAdd}
         boxShadow="0 10px 20px -5px rgba(66, 153, 225, 0.4)"
         mt={4}
       >
@@ -447,8 +465,8 @@ function TabHistory({ userName }: { userName: string }) {
                         </VStack>
                       </HStack>
                       <HStack spacing={3}>
-                        <Text fontWeight="bold" fontFamily="mono" color="red.500">
-                          -{exp.amount.toFixed(2)} €
+                        <Text fontWeight="bold" fontFamily="mono" color="red.500" fontSize="sm">
+                          -{exp.amount.toFixed(2)}€
                         </Text>
                         <IconButton
                           aria-label="Elimina"
@@ -476,6 +494,11 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [settleAmount, setSettleAmount] = useState('0');
+  
+  const { isOpen: isSettleOpen, onOpen: onSettleOpen, onClose: onSettleClose } = useDisclosure();
+  const { isOpen: isUndoOpen, onOpen: onUndoOpen, onClose: onUndoClose } = useDisclosure();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -583,23 +606,23 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
           {diff > 0 ? 'Elena deve dare a Matteo' : diff < 0 ? 'Matteo deve dare a Elena' : 'Siete pari!'}
         </Text>
         <Text fontSize="5xl" fontFamily="mono" fontWeight="black" color="gray.900">
-          € {Math.abs(diff).toFixed(2)}
+          €{Math.abs(diff).toFixed(2)}
         </Text>
       </VStack>
 
       <VStack spacing={4} align="stretch" my={2}>
         <Flex justify="space-between" align="center" fontSize="sm">
           <Text color="gray.500" fontWeight="medium">Pagato da Matteo</Text>
-          <Text fontWeight="bold">€ {balance.matteo.toFixed(2)}</Text>
+          <Text fontWeight="bold">€{balance.matteo.toFixed(2)}</Text>
         </Flex>
         <Flex justify="space-between" align="center" fontSize="sm">
           <Text color="gray.500" fontWeight="medium">Pagato da Elena</Text>
-          <Text fontWeight="bold" color="pink.600">€ {balance.elena.toFixed(2)}</Text>
+          <Text fontWeight="bold" color="pink.600">€{balance.elena.toFixed(2)}</Text>
         </Flex>
         <Divider />
         <Flex justify="space-between" align="center">
           <Text fontSize="xs" fontWeight="black" color="gray.400" textTransform="uppercase">Differenza Totale</Text>
-          <Text fontSize="lg" fontWeight="bold">€ {Math.abs(balance.matteo - balance.elena).toFixed(2)}</Text>
+          <Text fontSize="lg" fontWeight="bold">€{Math.abs(balance.matteo - balance.elena).toFixed(2)}</Text>
         </Flex>
       </VStack>
 
@@ -610,30 +633,99 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
         size="lg" 
         height="60px"
         borderRadius="2xl"
-        onClick={handleSettle}
+        onClick={onSettleOpen}
         isDisabled={diff === 0}
         _hover={{ bg: 'gray.800' }}
       >
         Salda Debito 🤝
       </Button>
 
+      {/* Popup di conferma per Saldo Debito */}
+      <AlertDialog
+        isOpen={isSettleOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onSettleClose}
+        isCentered
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent borderRadius="2xl" mx={4}>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Conferma Saldo
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              Sei sicuro di voler segnare il debito di <Text as="span" fontWeight="bold">€{Math.abs(diff).toFixed(2)}</Text> come saldato? 
+              Verrà creato un nuovo conguaglio e il bilancio verrà azzerato.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onSettleClose} variant="ghost" borderRadius="xl">
+                Annulla
+              </Button>
+              <Button colorScheme="green" onClick={() => { handleSettle(); onSettleClose(); }} ml={3} borderRadius="xl">
+                Sì, Salda
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+
       <Box pt={4}>
         <Text fontSize="xs" fontWeight="black" color="gray.400" textTransform="uppercase" mb={4}>Ultimi Conguagli</Text>
-        <VStack spacing={3} opacity={0.7}>
-          {settlements.map(s => (
-            <Flex key={s.id} justify="space-between" align="center" fontSize="xs" fontWeight="bold">
-              <HStack spacing={2}>
+        <VStack spacing={3} align="stretch">
+          {settlements.map((s, index) => (
+            <Flex key={s.id} justify="space-between" align="center" fontSize="xs" fontWeight="bold" w="full">
+              <HStack spacing={4}>
                 <Text color="gray.500">{new Date(s.settled_at).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
-                <IconButton
-                  aria-label="Elimina conguaglio"
-                  icon={<span>🗑️</span>}
-                  size="xs"
-                  variant="ghost"
-                  colorScheme="red"
-                  onClick={() => deleteSettlement(s.id)}
-                />
+                <Text fontFamily="mono" color="green.600">€{s.amount.toFixed(2)}</Text>
               </HStack>
-              <Text fontFamily="mono" color="green.600">€ {s.amount.toFixed(2)}</Text>
+              {index === 0 && (
+                <>
+                  <Button
+                    size="xs"
+                    variant="link"
+                    colorScheme="blue"
+                    onClick={() => {
+                      setPendingDeleteId(s.id);
+                      onUndoOpen();
+                    }}
+                    fontWeight="bold"
+                    textTransform="lowercase"
+                  >
+                    annulla
+                  </Button>
+
+                  {/* Popup di conferma per Annulla Conguaglio */}
+                  <AlertDialog
+                    isOpen={isUndoOpen}
+                    leastDestructiveRef={cancelRef}
+                    onClose={onUndoClose}
+                    isCentered
+                  >
+                    <AlertDialogOverlay>
+                      <AlertDialogContent borderRadius="2xl" mx={4}>
+                        <AlertDialogHeader fontSize="lg" fontWeight="bold">
+                          Annulla Conguaglio
+                        </AlertDialogHeader>
+
+                        <AlertDialogBody>
+                          Sei sicuro di voler annullare questo conguaglio? 
+                          Il debito relativo tornerà visibile nel bilancio.
+                        </AlertDialogBody>
+
+                        <AlertDialogFooter>
+                          <Button ref={cancelRef} onClick={onUndoClose} variant="ghost" borderRadius="xl">
+                            No
+                          </Button>
+                          <Button colorScheme="red" onClick={() => { if (pendingDeleteId) deleteSettlement(pendingDeleteId); onUndoClose(); }} ml={3} borderRadius="xl">
+                            Sì, Annulla
+                          </Button>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialogOverlay>
+                  </AlertDialog>
+                </>
+              )}
             </Flex>
           ))}
         </VStack>
