@@ -1,0 +1,6 @@
+{
+  "name": "Spese di Coppia",
+  "description": "App per la gestione delle spese di coppia con conguaglio automatico.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
