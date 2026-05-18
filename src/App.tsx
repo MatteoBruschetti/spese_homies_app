@@ -41,6 +41,8 @@ import {
   AlertDialogHeader,
   AlertDialogContent,
   AlertDialogOverlay,
+  Select,
+  Textarea,
 } from '@chakra-ui/react';
 import { supabase, Expense, Settlement } from './lib/supabase';
 
@@ -327,6 +329,14 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
 function TabHistory({ userName }: { userName: string }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const toast = useToast();
+
+  const handleClose = () => {
+    onClose();
+    setEditingExpense(null);
+  };
 
   const fetchExpenses = async () => {
     setLoading(true);
@@ -334,7 +344,7 @@ function TabHistory({ userName }: { userName: string }) {
       const { data, error } = await supabase
         .from('expenses')
         .select('*')
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       if (data) setExpenses(data);
@@ -359,7 +369,31 @@ function TabHistory({ userName }: { userName: string }) {
     }
   };
 
+  const handleUpdateExpense = async (updatedExpense: Partial<Expense>) => {
+    if (!editingExpense) return;
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .update(updatedExpense)
+        .eq('id', editingExpense.id);
+
+      if (error) throw error;
+      
+      toast({ title: 'Spesa aggiornata! ✅', status: 'success', duration: 2000 });
+      handleClose();
+      fetchExpenses();
+    } catch (error: any) {
+      console.error('Error updating expense:', error);
+      toast({ title: 'Errore durante l\'aggiornamento', description: error.message, status: 'error' });
+    }
+  };
+
   // Calcolo medie reali
+  const uniqueMonths = new Set(expenses.map(exp => {
+    const d = new Date(exp.created_at);
+    return `${d.getMonth()}-${d.getFullYear()}`;
+  })).size || 1;
+
   const totalsByPeriod = expenses.reduce((acc, exp) => {
     const d = new Date(exp.created_at);
     const monthKey = `${d.getMonth()}-${d.getFullYear()}`;
@@ -387,31 +421,32 @@ function TabHistory({ userName }: { userName: string }) {
     const total = expenses
       .filter(e => e.category === cat.name)
       .reduce((sum: number, e: Expense) => sum + e.amount, 0);
-    return { ...cat, total };
+    const monthlyAvg = total / uniqueMonths;
+    return { ...cat, total, monthlyAvg };
   }).filter(c => c.total > 0);
 
   return (
     <VStack spacing={6} align="stretch">
       {/* Stats Section */}
       <Box bg="white" p={6} borderRadius="3xl" shadow="sm" border="1px solid" borderColor="gray.100">
-        <Heading size="md" mb={4} fontWeight="bold">Riepilogo spese</Heading>
+        <Heading size="md" mb={4} fontWeight="bold">Riepilogo spese di coppia</Heading>
         <SimpleGrid columns={2} spacing={4}>
           <Box p={4} bg="blue.50" borderRadius="2xl">
-            <Text fontSize="10px" fontWeight="black" color="blue.600" textTransform="uppercase" mb={1}>Media mensile</Text>
+            <Text fontSize="10px" fontWeight="black" color="blue.600" textTransform="uppercase" mb={1}>Media mensile totale</Text>
             <Text fontSize="2xl" fontWeight="bold">€{monthlyAvg.toFixed(2)}</Text>
           </Box>
           <Box p={4} bg="green.50" borderRadius="2xl">
-            <Text fontSize="10px" fontWeight="black" color="green.600" textTransform="uppercase" mb={1}>Media annuale</Text>
+            <Text fontSize="10px" fontWeight="black" color="green.600" textTransform="uppercase" mb={1}>Media annuale totale</Text>
             <Text fontSize="2xl" fontWeight="bold">€{yearlyAvg.toFixed(2)}</Text>
           </Box>
         </SimpleGrid>
 
-        <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" mb={3} mt={6}>Per Categoria</Text>
+        <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" mb={3} mt={6}>Media mensile per categoria</Text>
         <HStack overflowX="auto" pb={2} spacing={4}>
           {catStats.length > 0 ? catStats.map(cat => (
-            <VStack key={cat.name} align="start" minW="100px" bg="gray.50" p={3} borderRadius="xl">
-              <Text fontSize="xs" color="gray.500">{cat.emoji} {cat.name}</Text>
-              <Text fontWeight="bold" fontSize="md">€{cat.total.toFixed(0)}</Text>
+            <VStack key={cat.name} align="start" minW="120px" bg="gray.50" p={3} borderRadius="xl" border="1px solid" borderColor="gray.100">
+              <Text fontSize="xs" color="gray.500" fontWeight="medium">{cat.emoji} {cat.name}</Text>
+              <Text fontWeight="bold" fontSize="lg">€{cat.monthlyAvg.toFixed(2)}</Text>
             </VStack>
           )) : <Text fontSize="xs" color="gray.400">Nessuna categoria.</Text>}
         </HStack>
@@ -440,11 +475,14 @@ function TabHistory({ userName }: { userName: string }) {
                 return (
                   <React.Fragment key={exp.id}>
                     {showMonthLabel && (
-                      <Box pt={index === 0 ? 0 : 6} pb={2}>
+                      <Flex pt={index === 0 ? 0 : 6} pb={2} justify="space-between" align="center">
                         <Badge colorScheme="gray" variant="subtle" px={3} py={1} borderRadius="lg" fontSize="10px" fontWeight="black">
                           {currentMonthLabel}
                         </Badge>
-                      </Box>
+                        <Text fontSize="10px" fontWeight="black" color="gray.400" textTransform="uppercase">
+                          Totale: €{totalsByPeriod.monthly[`${expDate.getMonth()}-${expDate.getFullYear()}`]?.toFixed(2)}
+                        </Text>
+                      </Flex>
                     )}
                     <Flex 
                       bg="gray.50" 
@@ -453,18 +491,47 @@ function TabHistory({ userName }: { userName: string }) {
                       align="center" 
                       justify="space-between"
                     >
-                      <HStack spacing={4}>
-                        <Center w={12} h={12} bg="white" borderRadius="xl" shadow="sm">
+                      <HStack spacing={4} flex={1} minW="0">
+                        <Center 
+                          w={12} 
+                          h={12} 
+                          bg="white" 
+                          borderRadius="xl" 
+                          shadow="sm" 
+                          cursor="pointer"
+                          _hover={{ bg: 'blue.50', transform: 'scale(1.05)' }}
+                          transition="all 0.2s"
+                          flexShrink={0}
+                          onClick={() => {
+                            setEditingExpense(exp);
+                            onOpen();
+                          }}
+                        >
                           {allPossibleCategories.find(c => c.name === exp.category)?.emoji || '❓'}
                         </Center>
-                        <VStack align="start" spacing={0}>
-                          <Text fontWeight="bold" fontSize="sm">{exp.category}</Text>
-                          <Text fontSize="10px" color="gray.400" fontWeight="bold" textTransform="uppercase">
-                            {expDate.toLocaleDateString()} • {exp.created_by}
-                          </Text>
+                        <VStack align="start" spacing={0} flex={1} minW="0">
+                          <Text fontWeight="bold" fontSize="sm" isTruncated w="full">{exp.category}</Text>
+                          <HStack spacing={1} align="center" w="full">
+                            <Text fontSize="10px" color="gray.400" fontWeight="bold" textTransform="uppercase" whiteSpace="nowrap">
+                              {expDate.toLocaleDateString()} • {exp.created_by}
+                            </Text>
+                            {exp.notes && (
+                              <Text 
+                                fontSize="10px" 
+                                color="gray.400" 
+                                fontWeight="bold"
+                                textTransform="uppercase"
+                                isTruncated
+                                flex={1}
+                                minW="0"
+                              >
+                                • {exp.notes}
+                              </Text>
+                            )}
+                          </HStack>
                         </VStack>
                       </HStack>
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexShrink={0} ml={2}>
                         <Text fontWeight="bold" fontFamily="mono" color="red.500" fontSize="sm">
                           -{exp.amount.toFixed(2)}€
                         </Text>
@@ -485,7 +552,111 @@ function TabHistory({ userName }: { userName: string }) {
           </VStack>
         )}
       </Box>
+
+      {/* Edit Modal */}
+      {editingExpense && (
+        <EditExpenseModal 
+          isOpen={isOpen} 
+          onClose={handleClose} 
+          expense={editingExpense} 
+          onSave={handleUpdateExpense} 
+        />
+      )}
     </VStack>
+  );
+}
+
+interface EditExpenseModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  expense: Expense;
+  onSave: (updated: Partial<Expense>) => Promise<void>;
+}
+
+function EditExpenseModal({ isOpen, onClose, expense, onSave }: EditExpenseModalProps) {
+  const [amount, setAmount] = useState(expense.amount.toString());
+  const [category, setCategory] = useState(expense.category);
+  const [createdAt, setCreatedAt] = useState(expense.created_at.split('T')[0]);
+  const [notes, setNotes] = useState(expense.notes || '');
+  const [loading, setLoading] = useState(false);
+
+  const handleSave = async () => {
+    setLoading(true);
+    const cleanAmount = amount.replace(',', '.');
+    await onSave({
+      amount: parseFloat(cleanAmount),
+      category,
+      created_at: new Date(createdAt).toISOString(),
+      notes
+    });
+    setLoading(false);
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} isCentered>
+      <ModalOverlay backdropFilter="blur(4px)" />
+      <ModalContent borderRadius="3xl" mx={4} p={2}>
+        <ModalHeader fontWeight="bold">Modifica Spesa</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <VStack spacing={4} align="stretch">
+            <Box>
+              <Text fontSize="xs" fontWeight="bold" color="gray.400" mb={1} textTransform="uppercase">Data</Text>
+              <Input 
+                type="date" 
+                value={createdAt} 
+                onChange={(e) => setCreatedAt(e.target.value)}
+                borderRadius="xl"
+              />
+            </Box>
+            <Box>
+              <Text fontSize="xs" fontWeight="bold" color="gray.400" mb={1} textTransform="uppercase">Importo</Text>
+              <Input 
+                type="number" 
+                value={amount} 
+                onChange={(e) => setAmount(e.target.value)}
+                borderRadius="xl"
+              />
+            </Box>
+            <Box>
+              <Text fontSize="xs" fontWeight="bold" color="gray.400" mb={1} textTransform="uppercase">Categoria</Text>
+              <Select 
+                value={category} 
+                onChange={(e) => setCategory(e.target.value)}
+                borderRadius="xl"
+              >
+                {CATEGORIES.map(c => <option key={c.name} value={c.name}>{c.emoji} {c.name}</option>)}
+                <option value="Altro">❓ Altro</option>
+              </Select>
+            </Box>
+            <Box>
+              <Text fontSize="xs" fontWeight="bold" color="gray.400" mb={1} textTransform="uppercase">Note</Text>
+              <Textarea 
+                value={notes} 
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Aggiungi una nota..."
+                borderRadius="xl"
+                rows={3}
+              />
+            </Box>
+          </VStack>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" mr={3} onClick={onClose} borderRadius="xl">
+            Annulla
+          </Button>
+          <Button 
+            colorScheme="blue" 
+            onClick={handleSave} 
+            isLoading={loading}
+            borderRadius="xl"
+            px={8}
+          >
+            Salva
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   );
 }
 

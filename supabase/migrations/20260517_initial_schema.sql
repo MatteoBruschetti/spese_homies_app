@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS public.expenses (
   amount FLOAT NOT NULL,
   category TEXT NOT NULL DEFAULT 'Altro',
   created_by TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  notes TEXT
 );
 
 -- Create Settlements table

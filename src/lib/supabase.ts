@@ -17,6 +17,7 @@ export interface Expense {
   category: string;
   created_by: string;
   created_at: string;
+  notes?: string;
 }
 
 export interface Settlement {
