@@ -45,6 +45,7 @@ import {
   Textarea,
 } from '@chakra-ui/react';
 import { supabase, Expense, Settlement } from './lib/supabase';
+import confetti from 'canvas-confetti';
 
 // --- Constants ---
 const CATEGORIES = [
@@ -196,6 +197,7 @@ function NavButton({ isActive, label, emoji, onClick }: { isActive: boolean, lab
 function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeof useToast> }) {
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -218,6 +220,7 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
         amount: numAmount,
         category: selectedCategory || 'Altro',
         created_by: userName,
+        notes: notes.trim() || null,
       });
 
       if (error) throw error;
@@ -225,6 +228,7 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
       toast({ title: 'Spesa aggiunta! ⚡', status: 'success', duration: 2000 });
       setAmount('');
       setSelectedCategory(null);
+      setNotes('');
     } catch (error: any) {
       console.error('Error adding expense:', error);
       toast({ 
@@ -292,7 +296,7 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
               height="80px"
               variant="outline"
               borderRadius="2xl"
-              onClick={() => setSelectedCategory(cat.name)}
+              onClick={() => setSelectedCategory(prev => prev === cat.name ? null : cat.name)}
               border="2px solid"
               borderColor={selectedCategory === cat.name ? 'blue.100' : 'gray.100'}
               bg={selectedCategory === cat.name ? 'blue.50' : 'white'}
@@ -306,6 +310,23 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
             </Button>
           ))}
         </SimpleGrid>
+      </VStack>
+
+      <VStack align="stretch" spacing={2}>
+        <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase">Nota</Text>
+        <Input
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Inserisci una nota"
+          variant="unstyled"
+          bg="gray.50"
+          p={5}
+          borderRadius="2xl"
+          fontSize="md"
+          color="gray.700"
+          _placeholder={{ color: 'gray.400' }}
+          _focus={{ bg: 'white', border: '1px solid', borderColor: 'blue.100' }}
+        />
       </VStack>
 
       <Button
@@ -423,7 +444,9 @@ function TabHistory({ userName }: { userName: string }) {
       .reduce((sum: number, e: Expense) => sum + e.amount, 0);
     const monthlyAvg = total / uniqueMonths;
     return { ...cat, total, monthlyAvg };
-  }).filter(c => c.total > 0);
+  })
+  .filter(c => c.total > 0)
+  .sort((a, b) => b.monthlyAvg - a.monthlyAvg);
 
   return (
     <VStack spacing={6} align="stretch">
@@ -432,12 +455,12 @@ function TabHistory({ userName }: { userName: string }) {
         <Heading size="md" mb={4} fontWeight="bold">Riepilogo spese di coppia</Heading>
         <SimpleGrid columns={2} spacing={4}>
           <Box p={4} bg="blue.50" borderRadius="2xl">
-            <Text fontSize="10px" fontWeight="black" color="blue.600" textTransform="uppercase" mb={1}>Media mensile totale</Text>
-            <Text fontSize="2xl" fontWeight="bold">€{monthlyAvg.toFixed(2)}</Text>
+            <Text fontSize="10px" fontWeight="black" color="blue.600" textTransform="uppercase" mb={1}>Media mensile</Text>
+            <Text fontSize="2xl" fontWeight="bold">€{Math.floor(monthlyAvg)}</Text>
           </Box>
           <Box p={4} bg="green.50" borderRadius="2xl">
-            <Text fontSize="10px" fontWeight="black" color="green.600" textTransform="uppercase" mb={1}>Media annuale totale</Text>
-            <Text fontSize="2xl" fontWeight="bold">€{yearlyAvg.toFixed(2)}</Text>
+            <Text fontSize="10px" fontWeight="black" color="green.600" textTransform="uppercase" mb={1}>Media annuale</Text>
+            <Text fontSize="2xl" fontWeight="bold">€{Math.floor(yearlyAvg)}</Text>
           </Box>
         </SimpleGrid>
 
@@ -446,7 +469,7 @@ function TabHistory({ userName }: { userName: string }) {
           {catStats.length > 0 ? catStats.map(cat => (
             <VStack key={cat.name} align="start" minW="120px" bg="gray.50" p={3} borderRadius="xl" border="1px solid" borderColor="gray.100">
               <Text fontSize="xs" color="gray.500" fontWeight="medium">{cat.emoji} {cat.name}</Text>
-              <Text fontWeight="bold" fontSize="lg">€{cat.monthlyAvg.toFixed(2)}</Text>
+              <Text fontWeight="bold" fontSize="lg">€{Math.floor(cat.monthlyAvg)}</Text>
             </VStack>
           )) : <Text fontSize="xs" color="gray.400">Nessuna categoria.</Text>}
         </HStack>
@@ -488,10 +511,10 @@ function TabHistory({ userName }: { userName: string }) {
                       bg="gray.50" 
                       p={4} 
                       borderRadius="2xl" 
-                      align="center" 
+                      align="start" 
                       justify="space-between"
                     >
-                      <HStack spacing={4} flex={1} minW="0">
+                      <HStack spacing={4} flex={1} minW="0" align="start">
                         <Center 
                           w={12} 
                           h={12} 
@@ -510,25 +533,12 @@ function TabHistory({ userName }: { userName: string }) {
                           {allPossibleCategories.find(c => c.name === exp.category)?.emoji || '❓'}
                         </Center>
                         <VStack align="start" spacing={0} flex={1} minW="0">
-                          <Text fontWeight="bold" fontSize="sm" isTruncated w="full">{exp.category}</Text>
-                          <HStack spacing={1} align="center" w="full">
+                          <Text fontWeight="bold" fontSize="sm" isTruncated w="full">{exp.notes || exp.category}</Text>
+                          <VStack align="start" spacing={0} w="full">
                             <Text fontSize="10px" color="gray.400" fontWeight="bold" textTransform="uppercase" whiteSpace="nowrap">
                               {expDate.toLocaleDateString()} • {exp.created_by}
                             </Text>
-                            {exp.notes && (
-                              <Text 
-                                fontSize="10px" 
-                                color="gray.400" 
-                                fontWeight="bold"
-                                textTransform="uppercase"
-                                isTruncated
-                                flex={1}
-                                minW="0"
-                              >
-                                • {exp.notes}
-                              </Text>
-                            )}
-                          </HStack>
+                          </VStack>
                         </VStack>
                       </HStack>
                       <HStack spacing={3} flexShrink={0} ml={2}>
@@ -709,6 +719,17 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
       if (error) throw error;
       
       const newSettlementId = data?.[0]?.id;
+
+      // Trigger confetti celebration
+      try {
+        confetti({
+          particleCount: 150,
+          spread: 80,
+          origin: { y: 0.6 }
+        });
+      } catch (err) {
+        console.error('Confetti error:', err);
+      }
 
       toast({
         duration: 5000,
