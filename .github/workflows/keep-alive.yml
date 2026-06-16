@@ -1,0 +1,16 @@
+name: Supabase Keep Alive
+
+on:
+   schedule:
+      # Esegue il job ogni lunedì alle 00:00 (orario UTC)
+      - cron: "0 0 * * 1"
+   workflow_dispatch: # Ti permette di lanciarlo manualmente per testare
+
+jobs:
+   ping:
+      runs-on: ubuntu-latest
+      steps:
+         - name: Ping Supabase/Vercel
+           run: |
+              # Sostituisci l'URL con l'indirizzo del tuo sito Vercel o un endpoint API
+              curl -f https://spese-homies-app.vercel.app/
