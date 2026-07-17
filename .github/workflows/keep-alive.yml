@@ -2,15 +2,16 @@ name: Supabase Keep Alive
 
 on:
    schedule:
-      # Esegue il job ogni lunedì alle 00:00 (orario UTC)
-      - cron: "0 0 * * 1"
-   workflow_dispatch: # Ti permette di lanciarlo manualmente per testare
+      # Gira ogni giorno alle 00:00 UTC (molto più sicuro per evitare i 7 giorni di timeout)
+      - cron: "0 0 * * *"
+   workflow_dispatch:
 
 jobs:
    ping:
       runs-on: ubuntu-latest
       steps:
-         - name: Ping Supabase/Vercel
+         - name: Ping Supabase API Direct
            run: |
-              # Sostituisci l'URL con l'indirizzo del tuo sito Vercel o un endpoint API
-              curl -f https://spese-homies-app.vercel.app/
+              curl -f -X GET "https://tjssmfntbuxubytujcdj.supabase.co/rest/v1/" \
+              -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
