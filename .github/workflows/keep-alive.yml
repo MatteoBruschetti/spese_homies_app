@@ -2,7 +2,6 @@ name: Supabase Keep Alive
 
 on:
    schedule:
-      # Gira ogni giorno alle 00:00 UTC (molto più sicuro per evitare i 7 giorni di timeout)
       - cron: "0 0 * * *"
    workflow_dispatch:
 
