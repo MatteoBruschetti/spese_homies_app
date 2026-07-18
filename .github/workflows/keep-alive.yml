@@ -11,6 +11,6 @@ jobs:
       steps:
          - name: Ping Supabase API Direct
            run: |
-              curl -i -X GET "https://tjssmfntbuxubytujcdj.supabase.co/auth/v1/health" \
+              curl -f -X GET "https://tjssmfntbuxubytujcdj.supabase.co/auth/v1/health" \
               -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
               -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
