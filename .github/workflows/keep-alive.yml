@@ -2,6 +2,7 @@ name: Supabase Keep Alive
 
 on:
    schedule:
+      # Gira ogni giorno a mezzanotte
       - cron: "0 0 * * *"
    workflow_dispatch:
 
@@ -9,8 +10,8 @@ jobs:
    ping:
       runs-on: ubuntu-latest
       steps:
-         - name: Ping Supabase API Direct
+         - name: Ping Supabase Database Direct
            run: |
-              curl -f -X GET "https://tjssmfntbuxubytujcdj.supabase.co/auth/v1/health" \
-              -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-              -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+              curl -f -X GET "https://tjssmfntbuxubytujcdj.supabase.co/rest/v1/expenses?select=*&limit=1" \
+              -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
