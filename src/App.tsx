@@ -87,6 +87,11 @@ function useUserIdentity() {
 // --- Types ---
 type Tab = 'ADD' | 'HISTORY' | 'BALANCE';
 
+// La RPC update_expense riscrive tutti e quattro i campi a ogni chiamata, quindi
+// il payload li elenca esplicitamente: con un Partial<Expense> un campo omesso
+// verrebbe azzerato in silenzio.
+type ExpenseEdit = Pick<Expense, 'amount' | 'category' | 'created_at' | 'notes'>;
+
 export default function App() {
   const userName = useUserIdentity();
   const [activeTab, setActiveTab] = useState<Tab>('ADD');
@@ -382,21 +387,25 @@ function TabHistory({ userName }: { userName: string }) {
 
   const deleteExpense = async (id: string) => {
     try {
-      const { error } = await supabase.from('expenses').delete().eq('id', id);
+      const { error } = await supabase.rpc('delete_expense', { p_id: id });
       if (error) throw error;
       fetchExpenses();
     } catch (error: any) {
       console.error('Error deleting expense:', error);
+      toast({ title: 'Errore durante l\'eliminazione', description: error.message, status: 'error' });
     }
   };
 
-  const handleUpdateExpense = async (updatedExpense: Partial<Expense>) => {
+  const handleUpdateExpense = async (updatedExpense: ExpenseEdit) => {
     if (!editingExpense) return;
     try {
-      const { error } = await supabase
-        .from('expenses')
-        .update(updatedExpense)
-        .eq('id', editingExpense.id);
+      const { error } = await supabase.rpc('update_expense', {
+        p_id: editingExpense.id,
+        p_amount: updatedExpense.amount,
+        p_category: updatedExpense.category,
+        p_created_at: updatedExpense.created_at,
+        p_notes: updatedExpense.notes ?? null,
+      });
 
       if (error) throw error;
       
@@ -410,31 +419,28 @@ function TabHistory({ userName }: { userName: string }) {
   };
 
   // Calcolo medie reali
-  const uniqueMonths = new Set(expenses.map(exp => {
-    const d = new Date(exp.created_at);
-    return `${d.getMonth()}-${d.getFullYear()}`;
-  })).size || 1;
-
   const totalsByPeriod = expenses.reduce((acc, exp) => {
     const d = new Date(exp.created_at);
     const monthKey = `${d.getMonth()}-${d.getFullYear()}`;
-    const yearKey = `${d.getFullYear()}`;
     acc.monthly[monthKey] = (acc.monthly[monthKey] || 0) + exp.amount;
-    acc.yearly[yearKey] = (acc.yearly[yearKey] || 0) + exp.amount;
     return acc;
-  }, { monthly: {} as Record<string, number>, yearly: {} as Record<string, number> });
+  }, { monthly: {} as Record<string, number> });
 
-  const monthlyValues = Object.values(totalsByPeriod.monthly) as number[];
-  const monthlySum = monthlyValues.reduce((a, b) => a + b, 0);
-  const monthlyAvg = Object.keys(totalsByPeriod.monthly).length > 0
-    ? monthlySum / Object.keys(totalsByPeriod.monthly).length
-    : 0;
+  // Finestra coperta dall'app: dal mese della prima spesa al mese corrente, inclusi.
+  // I mesi interni senza spese valgono come zeri reali, mentre i mesi fuori finestra
+  // (prima della prima spesa, o non ancora arrivati) non abbassano le medie.
+  const monthIndex = (d: Date) => d.getFullYear() * 12 + d.getMonth();
+  const firstMonth = expenses.reduce(
+    (min, exp) => Math.min(min, monthIndex(new Date(exp.created_at))),
+    Infinity
+  );
+  const coveredMonths = expenses.length > 0
+    ? Math.max(1, monthIndex(new Date()) - firstMonth + 1)
+    : 1;
 
-  const yearlyValues = Object.values(totalsByPeriod.yearly) as number[];
-  const yearlySum = yearlyValues.reduce((a, b) => a + b, 0);
-  const yearlyAvg = Object.keys(totalsByPeriod.yearly).length > 0
-    ? yearlySum / Object.keys(totalsByPeriod.yearly).length
-    : 0;
+  const totalSpend = expenses.reduce((sum: number, e: Expense) => sum + e.amount, 0);
+  const monthlyAvg = totalSpend / coveredMonths;
+  const yearlyAvg = monthlyAvg * 12;
 
   // Stats by category (including "Altro")
   const allPossibleCategories = [...CATEGORIES, HIDDEN_DEFAULT_CATEGORY];
@@ -442,7 +448,7 @@ function TabHistory({ userName }: { userName: string }) {
     const total = expenses
       .filter(e => e.category === cat.name)
       .reduce((sum: number, e: Expense) => sum + e.amount, 0);
-    const monthlyAvg = total / uniqueMonths;
+    const monthlyAvg = total / coveredMonths;
     return { ...cat, total, monthlyAvg };
   })
   .filter(c => c.total > 0)
@@ -580,7 +586,7 @@ interface EditExpenseModalProps {
   isOpen: boolean;
   onClose: () => void;
   expense: Expense;
-  onSave: (updated: Partial<Expense>) => Promise<void>;
+  onSave: (updated: ExpenseEdit) => Promise<void>;
 }
 
 function EditExpenseModal({ isOpen, onClose, expense, onSave }: EditExpenseModalProps) {
@@ -770,7 +776,7 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
 
   const deleteSettlement = async (id: string, isUndo: boolean = false) => {
     try {
-      const { error } = await supabase.from('settlements').delete().eq('id', id);
+      const { error } = await supabase.rpc('delete_settlement', { p_id: id });
       if (error) throw error;
       fetchData();
       toast({ 

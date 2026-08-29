@@ -1,3 +1,9 @@
+-- ATTENZIONE: file storico, NON eseguire su un progetto esistente.
+-- Le policy qui sotto sono `FOR ALL USING (true)`: rieseguirlo riaprirebbe
+-- l'accesso pubblico in scrittura chiuso da
+-- supabase/migrations/20260829_lockdown_anon_writes.sql.
+-- La fonte di verita' e' la cartella supabase/migrations/.
+
 -- SQL Script for Supabase Table Creation
 
 -- Create Expenses table
