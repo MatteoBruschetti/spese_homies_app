@@ -1,1 +1,36 @@
-@import "tailwindcss";
+/*
+ * Le uniche righe del preflight di Tailwind che avevano davvero un effetto in
+ * questa app. Tutto il resto dei 7,5 KB era gia' coperto dal CSSReset che
+ * ChakraProvider inietta a runtime, oppure inerte: nel sorgente non c'e' una
+ * sola className, quindi le utility di Tailwind non venivano mai usate.
+ *
+ * Ricavate confrontando gli stili calcolati di tutti gli elementi della UI
+ * (tre tab, modale di modifica e dialogo di conferma) prima e dopo la rimozione:
+ * queste erano le sole differenze non riconducibili a variabili morte.
+ */
+
+html {
+  /* Senza, il browser disegna un lampo grigio a ogni tocco. Si nota su mobile,
+     che e' il contesto d'uso di questa app. */
+  -webkit-tap-highlight-color: transparent;
+  /* Conta solo dentro <textarea>, che preserva i TAB: senza questa riga una
+     nota incollata con dei tab si allargherebbe da 4 a 8 colonne. */
+  tab-size: 4;
+}
+
+button,
+input,
+select,
+optgroup,
+textarea {
+  /* I controlli form non ereditano le proprieta' di font: senza questa riga
+     perdono il font-feature-settings "kern" che Chakra imposta su body, e con
+     esso lo stesso crenaggio del resto del testo. */
+  font-feature-settings: inherit;
+}
+
+option {
+  /* Tailwind azzerava margini e padding su tutto; l'unico elemento che Chakra
+     non copriva era <option>. */
+  padding: 0;
+}

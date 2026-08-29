@@ -92,6 +92,10 @@ type Tab = 'ADD' | 'HISTORY' | 'BALANCE';
 // verrebbe azzerato in silenzio.
 type ExpenseEdit = Pick<Expense, 'amount' | 'category' | 'created_at' | 'notes'>;
 
+// Estremo sinistro di ripiego quando non c'e' un conguaglio precedente: una
+// data anteriore a qualsiasi spesa, com'era gia' nel filtro lato server.
+const FIRST_EXPENSE_EVER = '2000-01-01T00:00:00Z';
+
 /** Stesso ordinamento della query: `created_at` decrescente. */
 const sortByNewest = (items: Expense[]) =>
   [...items].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -863,18 +867,40 @@ function TabBalance({ userName, toast, expenses, settlements, onSettled, onSettl
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
+  // Quanto ha anticipato una persona in una finestra temporale, estremo destro
+  // incluso: la stessa somma serve sia al bilancio corrente sia, a finestra
+  // chiusa, a ricostruire il verso dei conguagli passati.
+  const paidBetween = (who: string, from: number, to: number) =>
+    expenses.reduce((sum, e) => {
+      if (e.created_by !== who) return sum;
+      const at = new Date(e.created_at).getTime();
+      return at > from && at <= to ? sum + e.amount : sum;
+    }, 0);
+
   // Il bilancio conta solo le spese successive all'ultimo conguaglio. Era un
   // `.gt('created_at', lastDate)` lato server; ora le spese ci sono gia' tutte
   // in memoria. La data di ripiego resta identica a prima, cosi' il risultato
   // non cambia quando non c'e' ancora nessun conguaglio.
-  const since = new Date(settlements[0]?.settled_at ?? '2000-01-01T00:00:00Z').getTime();
-  const sinceLastSettlement = expenses.filter(e => new Date(e.created_at).getTime() > since);
-  const totalPaidBy = (who: string) =>
-    sinceLastSettlement.filter(e => e.created_by === who).reduce((sum, e) => sum + e.amount, 0);
-  const balance = { matteo: totalPaidBy('Matteo'), elena: totalPaidBy('Elena') };
+  const since = new Date(settlements[0]?.settled_at ?? FIRST_EXPENSE_EVER).getTime();
+  const balance = { matteo: paidBetween('Matteo', since, Infinity), elena: paidBetween('Elena', since, Infinity) };
   const diff = (balance.matteo - balance.elena) / 2;
   // Prima arrivava da una `limit(5)` sul server.
   const recentSettlements = settlements.slice(0, 5);
+
+  // Il conguaglio salva solo l'importo e chi ha premuto il tasto, non il verso:
+  // quello si ricava dalle spese che ha chiuso, cioe' quelle fra il conguaglio
+  // precedente e lui. Verde a chi era a credito e ha incassato, rosso a chi era
+  // a debito e ha restituito i soldi.
+  const settlementColor = (index: number) => {
+    const to = new Date(settlements[index].settled_at).getTime();
+    const from = new Date(settlements[index + 1]?.settled_at ?? FIRST_EXPENSE_EVER).getTime();
+    const windowDiff = paidBetween('Matteo', from, to) - paidBetween('Elena', from, to);
+    // Finestra in pari: succede solo se le spese sono cambiate dopo il
+    // conguaglio, e allora non c'e' un verso da colorare.
+    if (windowDiff === 0) return 'gray.500';
+    const creditor = windowDiff > 0 ? 'Matteo' : 'Elena';
+    return creditor === userName ? 'green.600' : 'red.500';
+  };
 
   const handleSettle = async () => {
     try {
@@ -1037,7 +1063,7 @@ function TabBalance({ userName, toast, expenses, settlements, onSettled, onSettl
             <Flex key={s.id} justify="space-between" align="center" fontSize="xs" fontWeight="bold" w="full">
               <HStack spacing={4}>
                 <Text color="gray.500">{new Date(s.settled_at).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
-                <Text fontFamily="mono" color="green.600">€{s.amount.toFixed(2)}</Text>
+                <Text fontFamily="mono" color={settlementColor(index)}>€{s.amount.toFixed(2)}</Text>
               </HStack>
               {index === 0 && (
                 <>
