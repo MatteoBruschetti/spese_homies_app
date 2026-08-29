@@ -2,16 +2,48 @@ name: Supabase Keep Alive
 
 on:
    schedule:
-      # Gira ogni giorno a mezzanotte
-      - cron: "0 0 * * *"
+      - cron: "23 1,5,9,13,17,21 * * *"
    workflow_dispatch:
+
+concurrency:
+   group: supabase-keepalive
+   cancel-in-progress: false
 
 jobs:
    ping:
       runs-on: ubuntu-latest
+      timeout-minutes: 5
       steps:
-         - name: Ping Supabase Database Direct
+         - name: Ping Supabase
+           env:
+              SUPABASE_URL: https://tjssmfntbuxubytujcdj.supabase.co
+              KEY: ${{ secrets.SUPABASE_ANON_KEY }}
            run: |
-              curl -f -X GET "https://tjssmfntbuxubytujcdj.supabase.co/rest/v1/expenses?select=*&limit=1" \
-              -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-              -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+              set -euo pipefail
+
+              ping_rpc() {
+                curl -fsS --max-time 20 --retry 3 --retry-delay 5 --retry-all-errors \
+                  -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive_ping" \
+                  -H "apikey: $KEY" \
+                  -H "Authorization: Bearer $KEY" \
+                  -H "Content-Type: application/json" \
+                  -d '{"src":"github-actions"}'
+                echo
+              }
+
+              read_table() {
+                curl -fsS --max-time 20 --retry 3 --retry-delay 5 --retry-all-errors \
+                  "$SUPABASE_URL/rest/v1/expenses?select=id&limit=1" \
+                  -H "apikey: $KEY" \
+                  -H "Authorization: Bearer $KEY" > /dev/null
+                echo "read ok"
+              }
+
+              for i in 1 2 3; do
+                echo "--- giro $i ---"
+                ping_rpc
+                read_table
+                [ "$i" -lt 3 ] && sleep 15 || true
+              done
+
+              echo "Keep-alive completato"
