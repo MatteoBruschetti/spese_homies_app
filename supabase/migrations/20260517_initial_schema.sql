@@ -1,3 +1,12 @@
+-- ATTENZIONE: questa migrazione e' gia' applicata in produzione e il blocco DO
+-- in fondo ricrea `"Public Access" FOR ALL USING (true)` se una policy con QUEL
+-- nome non esiste. Dopo 20260829_lockdown_anon_writes.sql le policy si chiamano
+-- diversamente, quindi rieseguirla riaprirebbe l'accesso pubblico in scrittura.
+--
+-- Non lanciare `supabase db push` finche' lo storico remoto non e' allineato con
+--     supabase migration repair --status applied 20260517 20260518 20260829 20260830 20260831
+-- (richiede SUPABASE_DB_PASSWORD nell'ambiente).
+
 -- Migration: 20260517_init_schema
 -- Description: Create expenses and settlements tables for "Spese di Coppia"
 

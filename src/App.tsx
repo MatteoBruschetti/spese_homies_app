@@ -44,7 +44,7 @@ import {
   Select,
   Textarea,
 } from '@chakra-ui/react';
-import { supabase, Expense, Settlement } from './lib/supabase';
+import { supabase, deviceToken, saveDeviceToken, Expense, Settlement } from './lib/supabase';
 import confetti from 'canvas-confetti';
 
 // --- Constants ---
@@ -100,6 +100,10 @@ export default function App() {
     isClosable: true,
     duration: 3000,
   });
+
+  // Senza token il database non risponderebbe comunque nulla: meglio dirlo
+  // esplicitamente che mostrare un'app vuota e muta.
+  if (!deviceToken) return <DeviceNotEnrolled />;
 
   if (!userName) return null;
 
@@ -181,6 +185,69 @@ export default function App() {
 }
 
 // --- Sub-components (Tabs) ---
+
+function DeviceNotEnrolled() {
+  const [value, setValue] = useState('');
+  const [failed, setFailed] = useState(false);
+
+  const activate = () => {
+    if (saveDeviceToken(value)) {
+      window.location.reload();
+    } else {
+      setFailed(true);
+    }
+  };
+
+  return (
+    <ChakraProvider>
+      <Center bg="gray.50" minH="100vh" px={6}>
+        <VStack
+          as="form"
+          onSubmit={(e) => { e.preventDefault(); activate(); }}
+          spacing={5}
+          bg="white"
+          p={10}
+          borderRadius="3xl"
+          shadow="sm"
+          border="1px solid"
+          borderColor="gray.100"
+          maxW="sm"
+          textAlign="center"
+        >
+          <Text fontSize="5xl">🔒</Text>
+          <Heading size="md" fontWeight="bold">Dispositivo da attivare</Heading>
+          <Text fontSize="sm" color="gray.500">
+            Incolla qui la chiave di questo dispositivo, o il link di attivazione
+            completo. Va fatto una volta sola: l'app se la ricorda.
+          </Text>
+          <Input
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setFailed(false); }}
+            placeholder="chiave o link di attivazione"
+            bg="gray.50"
+            borderRadius="xl"
+            fontSize="sm"
+            fontFamily="mono"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          {failed && (
+            <Text fontSize="xs" color="red.500" fontWeight="bold">
+              Chiave non valida. Devono essere 64 caratteri esadecimali.
+            </Text>
+          )}
+          <Button type="submit" colorScheme="blue" borderRadius="xl" w="full" isDisabled={!value.trim()}>
+            Attiva
+          </Button>
+          <Text fontSize="xs" color="gray.400">
+            Se hai svuotato i dati del browser la chiave è stata cancellata: reincollala.
+          </Text>
+        </VStack>
+      </Center>
+    </ChakraProvider>
+  );
+}
 
 function NavButton({ isActive, label, emoji, onClick }: { isActive: boolean, label: string, emoji: string, onClick: () => void }) {
   return (
