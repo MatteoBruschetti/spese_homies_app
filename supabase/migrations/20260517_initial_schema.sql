@@ -3,9 +3,10 @@
 -- nome non esiste. Dopo 20260829_lockdown_anon_writes.sql le policy si chiamano
 -- diversamente, quindi rieseguirla riaprirebbe l'accesso pubblico in scrittura.
 --
--- Non lanciare `supabase db push` finche' lo storico remoto non e' allineato con
---     supabase migration repair --status applied 20260517 20260518 20260829 20260830 20260831
--- (richiede SUPABASE_DB_PASSWORD nell'ambiente).
+-- Lo storico remoto e' stato allineato il 2026-08-29 con `supabase migration
+-- repair --status applied`, quindi `supabase db push` NON riesegue piu' questo
+-- file (verificato: `db push --dry-run` risponde "Remote database is up to date").
+-- Resta valido il divieto di eseguirlo a mano.
 
 -- Migration: 20260517_init_schema
 -- Description: Create expenses and settlements tables for "Spese di Coppia"

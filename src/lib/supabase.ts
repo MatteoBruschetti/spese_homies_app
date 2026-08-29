@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { createClient } from '@supabase/supabase-js';
+import { PostgrestClient } from '@supabase/postgrest-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://tjssmfntbuxubytujcdj.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9tyzODAB4aq65qOdH3t2Sw_B1QmlSE6';
@@ -59,10 +59,36 @@ export function saveDeviceToken(input: string): boolean {
   return true;
 }
 
+/**
+ * Solo PostgREST, non il client Supabase completo.
+ *
+ * `createClient` costruisce auth, realtime e storage dentro al costruttore,
+ * quindi il tree-shaking non riesce a toglierli anche se non vengono mai
+ * chiamati: erano 172 KB non compressi (48 KB gzip, il 21% del bundle) per
+ * codice morto. L'app parla solo di `from()` e `rpc()`, cioe' PostgREST.
+ *
+ * La versione e' fissata esatta e uguale a quella che supabase-js risolveva,
+ * cosi' questo resta un cambio di confezione e non un aggiornamento nascosto.
+ *
+ * Gli header replicano quelli che supabase-js produceva a ogni richiesta:
+ * `apikey` e `Authorization` li aggiungeva il suo wrapper di fetch, prendendo
+ * la anon key perche' nessuna sessione di Supabase Auth e' mai esistita in
+ * questa app (l'autorizzazione passa da `x-device-token`). Verificato: le nove
+ * chiamate dell'app generano richieste HTTP identiche byte per byte.
+ *
+ * Se un giorno si adotta Supabase Auth servira' `@supabase/auth-js` e un
+ * `fetch` personalizzato che rilegge il token di sessione a ogni richiesta.
+ */
+const restUrl = new URL('rest/v1', supabaseUrl.endsWith('/') ? supabaseUrl : supabaseUrl + '/').href;
+
 // Use defaults to avoid load errors, but prefer env variables
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  global: {
-    headers: deviceToken ? { 'x-device-token': deviceToken } : {},
+export const supabase = new PostgrestClient(restUrl, {
+  schema: 'public',
+  headers: {
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${supabaseAnonKey}`,
+    'X-Client-Info': 'postgrest-js/2.105.4',
+    ...(deviceToken ? { 'x-device-token': deviceToken } : {}),
   },
 });
 

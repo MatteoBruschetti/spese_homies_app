@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChakraProvider,
   Box,
@@ -92,6 +92,100 @@ type Tab = 'ADD' | 'HISTORY' | 'BALANCE';
 // verrebbe azzerato in silenzio.
 type ExpenseEdit = Pick<Expense, 'amount' | 'category' | 'created_at' | 'notes'>;
 
+/** Stesso ordinamento della query: `created_at` decrescente. */
+const sortByNewest = (items: Expense[]) =>
+  [...items].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+/**
+ * Fonte unica dei dati per tutte e tre le tab.
+ *
+ * Prima ogni tab faceva le proprie query dentro un `useEffect`, e siccome App
+ * rende le tab con `&&` queste si smontano al cambio: tornare su una tab
+ * rifaceva tutto da capo. In totale quattro query, di cui tre in serie nel
+ * bilancio. Tenendo i dati qui il cambio tab non tocca piu' la rete.
+ *
+ * Due query bastano per tutto: il bilancio si ricava dalle stesse spese e dagli
+ * stessi conguagli che servono allo storico, quindi le sue tre sono sparite
+ * (`limit(1)` era per giunta un sottoinsieme di `limit(5)`).
+ *
+ * NOTA: questo presuppone di avere in memoria TUTTE le spese. Il giorno in cui
+ * lo storico verra' paginato, il bilancio dovra' tornare a un'aggregazione
+ * lato database.
+ */
+function useExpenseData() {
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [loading, setLoading] = useState(true);
+  // Al risveglio `visibilitychange` e `focus` scattano quasi sempre insieme:
+  // senza questo guard partirebbero due ricariche identiche.
+  const inFlight = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const [ex, st] = await Promise.all([
+        supabase.from('expenses').select('*').order('created_at', { ascending: false }),
+        supabase.from('settlements').select('*').order('settled_at', { ascending: false }),
+      ]);
+      if (ex.error) throw ex.error;
+      if (st.error) throw st.error;
+      setExpenses(ex.data ?? []);
+      setSettlements(st.data ?? []);
+    } catch (error: any) {
+      // Una ricarica fallita lascia a schermo i dati che c'erano gia', invece di
+      // svuotare la lista. Al primo caricamento non c'e' nulla da tenere, quindi
+      // li' il risultato e' identico a prima.
+      console.error('Error fetching data:', error);
+    } finally {
+      inFlight.current = false;
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Senza token le policy farebbero tornare liste vuote: l'app mostra
+    // comunque la schermata di attivazione, quindi non chiediamo nulla.
+    if (!deviceToken) {
+      setLoading(false);
+      return;
+    }
+
+    refresh();
+
+    // Il refetch a ogni cambio tab era anche l'unico modo in cui l'app si
+    // accorgeva di una spesa aggiunta dall'altro dispositivo. Al suo posto
+    // ricarichiamo quando la pagina torna in primo piano, che copre il caso
+    // vero: la web app aperta dalla schermata Home e ripresa in mano piu' tardi.
+    // `loading` non viene toccato, quindi i dati restano a schermo e non
+    // ricompare "Caricamento...".
+    const onWake = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+    return () => {
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+    };
+  }, [refresh]);
+
+  return {
+    expenses,
+    settlements,
+    loading,
+    // Le spese vanno riordinate perche' la modifica puo' cambiarne la data; i
+    // conguagli no, perche' `settled_at` lo scrive il database con now(), quindi
+    // il nuovo e' sempre il piu' recente.
+    addExpense: (created: Expense) => setExpenses(prev => sortByNewest([created, ...prev])),
+    removeExpense: (id: string) => setExpenses(prev => prev.filter(e => e.id !== id)),
+    updateExpense: (id: string, fields: ExpenseEdit) =>
+      setExpenses(prev => sortByNewest(prev.map(e => (e.id === id ? { ...e, ...fields } : e)))),
+    addSettlement: (created: Settlement) => setSettlements(prev => [created, ...prev]),
+    removeSettlement: (id: string) => setSettlements(prev => prev.filter(s => s.id !== id)),
+  };
+}
+
 export default function App() {
   const userName = useUserIdentity();
   const [activeTab, setActiveTab] = useState<Tab>('ADD');
@@ -100,6 +194,7 @@ export default function App() {
     isClosable: true,
     duration: 3000,
   });
+  const data = useExpenseData();
 
   // Senza token il database non risponderebbe comunque nulla: meglio dirlo
   // esplicitamente che mostrare un'app vuota e muta.
@@ -138,9 +233,27 @@ export default function App() {
 
           {/* Main Content */}
           <Box minH="60vh">
-            {activeTab === 'ADD' && <TabAdd userName={userName} toast={toast} />}
-            {activeTab === 'HISTORY' && <TabHistory userName={userName} />}
-            {activeTab === 'BALANCE' && <TabBalance userName={userName} toast={toast} />}
+            {activeTab === 'ADD' && (
+              <TabAdd userName={userName} toast={toast} onAdded={data.addExpense} />
+            )}
+            {activeTab === 'HISTORY' && (
+              <TabHistory
+                expenses={data.expenses}
+                loading={data.loading}
+                onDeleted={data.removeExpense}
+                onUpdated={data.updateExpense}
+              />
+            )}
+            {activeTab === 'BALANCE' && (
+              <TabBalance
+                userName={userName}
+                toast={toast}
+                expenses={data.expenses}
+                settlements={data.settlements}
+                onSettled={data.addSettlement}
+                onSettlementDeleted={data.removeSettlement}
+              />
+            )}
           </Box>
         </Container>
 
@@ -266,7 +379,11 @@ function NavButton({ isActive, label, emoji, onClick }: { isActive: boolean, lab
   );
 }
 
-function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeof useToast> }) {
+function TabAdd({ userName, toast, onAdded }: {
+  userName: string,
+  toast: ReturnType<typeof useToast>,
+  onAdded: (created: Expense) => void,
+}) {
   const [amount, setAmount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
@@ -288,14 +405,18 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
 
     setLoading(true);
     try {
-      const { error } = await supabase.from('expenses').insert({
+      // `.select()` fa tornare la riga appena creata, con l'id e il created_at
+      // generati dal database: cosi' lo storico la mostra subito senza dover
+      // rileggere l'intera tabella. E' lo stesso schema che usa handleSettle.
+      const { data, error } = await supabase.from('expenses').insert({
         amount: numAmount,
         category: selectedCategory || 'Altro',
         created_by: userName,
         notes: notes.trim() || null,
-      });
+      }).select();
 
       if (error) throw error;
+      if (data?.[0]) onAdded(data[0]);
 
       toast({ title: 'Spesa aggiunta! ⚡', status: 'success', duration: 2000 });
       setAmount('');
@@ -419,9 +540,12 @@ function TabAdd({ userName, toast }: { userName: string, toast: ReturnType<typeo
   );
 }
 
-function TabHistory({ userName }: { userName: string }) {
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(true);
+function TabHistory({ expenses, loading, onDeleted, onUpdated }: {
+  expenses: Expense[],
+  loading: boolean,
+  onDeleted: (id: string) => void,
+  onUpdated: (id: string, fields: ExpenseEdit) => void,
+}) {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const toast = useToast();
@@ -431,32 +555,11 @@ function TabHistory({ userName }: { userName: string }) {
     setEditingExpense(null);
   };
 
-  const fetchExpenses = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      if (data) setExpenses(data);
-    } catch (error: any) {
-      console.error('Error fetching expenses:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchExpenses();
-  }, []);
-
   const deleteExpense = async (id: string) => {
     try {
       const { error } = await supabase.rpc('delete_expense', { p_id: id });
       if (error) throw error;
-      fetchExpenses();
+      onDeleted(id);
     } catch (error: any) {
       console.error('Error deleting expense:', error);
       toast({ title: 'Errore durante l\'eliminazione', description: error.message, status: 'error' });
@@ -465,9 +568,11 @@ function TabHistory({ userName }: { userName: string }) {
 
   const handleUpdateExpense = async (updatedExpense: ExpenseEdit) => {
     if (!editingExpense) return;
+    // handleClose() azzera editingExpense, quindi l'id va preso prima.
+    const { id } = editingExpense;
     try {
       const { error } = await supabase.rpc('update_expense', {
-        p_id: editingExpense.id,
+        p_id: id,
         p_amount: updatedExpense.amount,
         p_category: updatedExpense.category,
         p_created_at: updatedExpense.created_at,
@@ -475,10 +580,12 @@ function TabHistory({ userName }: { userName: string }) {
       });
 
       if (error) throw error;
-      
+
       toast({ title: 'Spesa aggiornata! ✅', status: 'success', duration: 2000 });
       handleClose();
-      fetchExpenses();
+      // La RPC scrive i valori cosi' come glieli passiamo e non restituisce
+      // nulla (RETURNS void), quindi lo stato locale e' gia' esatto.
+      onUpdated(id, updatedExpense);
     } catch (error: any) {
       console.error('Error updating expense:', error);
       toast({ title: 'Errore durante l\'aggiornamento', description: error.message, status: 'error' });
@@ -743,55 +850,47 @@ function EditExpenseModal({ isOpen, onClose, expense, onSave }: EditExpenseModal
   );
 }
 
-function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<typeof useToast> }) {
-  const [balance, setBalance] = useState({ matteo: 0, elena: 0 });
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [settleAmount, setSettleAmount] = useState('0');
-  
+function TabBalance({ userName, toast, expenses, settlements, onSettled, onSettlementDeleted }: {
+  userName: string,
+  toast: ReturnType<typeof useToast>,
+  expenses: Expense[],
+  settlements: Settlement[],
+  onSettled: (created: Settlement) => void,
+  onSettlementDeleted: (id: string) => void,
+}) {
   const { isOpen: isSettleOpen, onOpen: onSettleOpen, onClose: onSettleClose } = useDisclosure();
   const { isOpen: isUndoOpen, onOpen: onUndoOpen, onClose: onUndoClose } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const { data: lastSettle } = await supabase.from('settlements').select('*').order('settled_at', { ascending: false }).limit(1);
-      const lastDate = lastSettle?.[0]?.settled_at || '2000-01-01T00:00:00Z';
-      
-      const { data: allSettle } = await supabase.from('settlements').select('*').order('settled_at', { ascending: false }).limit(5);
-      setSettlements(allSettle || []);
-
-      const { data: expenses, error } = await supabase.from('expenses').select('*').gt('created_at', lastDate);
-      if (error) throw error;
-
-      if (expenses) {
-        const matteoTotal = expenses.filter(e => e.created_by === 'Matteo').reduce((sum, e) => sum + e.amount, 0);
-        const elenaTotal = expenses.filter(e => e.created_by === 'Elena').reduce((sum, e) => sum + e.amount, 0);
-        setBalance({ matteo: matteoTotal, elena: elenaTotal });
-        setSettleAmount(Math.abs((matteoTotal - elenaTotal) / 2).toFixed(2));
-      }
-    } catch (error: any) {
-      console.error('Error fetching balance data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
+  // Il bilancio conta solo le spese successive all'ultimo conguaglio. Era un
+  // `.gt('created_at', lastDate)` lato server; ora le spese ci sono gia' tutte
+  // in memoria. La data di ripiego resta identica a prima, cosi' il risultato
+  // non cambia quando non c'e' ancora nessun conguaglio.
+  const since = new Date(settlements[0]?.settled_at ?? '2000-01-01T00:00:00Z').getTime();
+  const sinceLastSettlement = expenses.filter(e => new Date(e.created_at).getTime() > since);
+  const totalPaidBy = (who: string) =>
+    sinceLastSettlement.filter(e => e.created_by === who).reduce((sum, e) => sum + e.amount, 0);
+  const balance = { matteo: totalPaidBy('Matteo'), elena: totalPaidBy('Elena') };
+  const diff = (balance.matteo - balance.elena) / 2;
+  // Prima arrivava da una `limit(5)` sul server.
+  const recentSettlements = settlements.slice(0, 5);
 
   const handleSettle = async () => {
     try {
-      const amountToSettle = parseFloat(settleAmount);
+      // L'arrotondamento c'era gia' prima, dentro fetchData: senza, una
+      // differenza come 12.345 finirebbe nel database non arrotondata.
+      const amountToSettle = parseFloat(Math.abs(diff).toFixed(2));
       const { data, error } = await supabase
         .from('settlements')
         .insert({ amount: amountToSettle, settled_by: userName })
         .select();
 
       if (error) throw error;
-      
-      const newSettlementId = data?.[0]?.id;
+
+      const created = data?.[0];
+      const newSettlementId = created?.id;
+      if (created) onSettled(created);
 
       // Trigger confetti celebration
       try {
@@ -833,8 +932,6 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
         ),
         position: 'top',
       });
-
-      fetchData();
     } catch (error: any) {
       console.error('Error settling debt:', error);
       toast({ title: 'Errore durante il saldo', description: error.message, status: 'error' });
@@ -845,8 +942,8 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
     try {
       const { error } = await supabase.rpc('delete_settlement', { p_id: id });
       if (error) throw error;
-      fetchData();
-      toast({ 
+      onSettlementDeleted(id);
+      toast({
         title: isUndo ? 'Saldo annullato ↩️' : 'Conguaglio eliminato 🗑️', 
         status: 'info', 
         duration: 2000,
@@ -856,8 +953,6 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
       toast({ title: 'Errore durante l\'eliminazione', description: error.message, status: 'error' });
     }
   };
-
-  const diff = (balance.matteo - balance.elena) / 2;
 
   return (
     <VStack spacing={6} align="stretch" bg="white" p={8} borderRadius="3xl" shadow="sm" border="1px solid" borderColor="gray.100">
@@ -938,7 +1033,7 @@ function TabBalance({ userName, toast }: { userName: string, toast: ReturnType<t
       <Box pt={4}>
         <Text fontSize="xs" fontWeight="black" color="gray.400" textTransform="uppercase" mb={4}>Ultimi Conguagli</Text>
         <VStack spacing={3} align="stretch">
-          {settlements.map((s, index) => (
+          {recentSettlements.map((s, index) => (
             <Flex key={s.id} justify="space-between" align="center" fontSize="xs" fontWeight="bold" w="full">
               <HStack spacing={4}>
                 <Text color="gray.500">{new Date(s.settled_at).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
